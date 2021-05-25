@@ -1,0 +1,7 @@
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/ssl/private/selfsigned.key -out /etc/ssl/certs/selfsigned.crt
+openssl req -x509 -newkey rsa:4096 -nodes -out cert.pem -keyout key.pem -days 365
+
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /home/pi/proxyServer/local.key -out /home/pi/proxyServer/local.crt
+
+for getting "ssl_context='adhoc'" to work:
+pip3 install pyopenssl
