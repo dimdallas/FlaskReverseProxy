@@ -3,12 +3,21 @@ from werkzeug.serving import WSGIRequestHandler
 from flask import Flask, request, Response, stream_with_context, make_response
 import requests
 import threading
+import collections
+import signal
+import gc
+
+def handler(signum, frame):
+	print("closing")
+	exit(0)
+
+signal.signal(signal.SIGINT, handler)
 
 app = Flask(__name__)
 SITE_NAME = 'http://10.64.45.228'
 recThread = None
 sem = threading.Semaphore()
-buffer = []
+buffer = collections.deque([])
 
 excluded_headers = ['content-encoding', 'transfer-encoding']
 # excluded_headers = ['content-encoding', 'transfer-encoding', 'content-length', 'connection']
@@ -19,31 +28,36 @@ default_headers = [('Connection','Keep-Alive'), ('Content-Type','multipart/x-mix
 # ('Transfer-Encoding', 'Chunked')]
 
 def recordMjpeg(response):
-    # f = open('mjpegRec', "w+b")
-    for line in response.iter_content(chunk_size=None):
-        sem.acquire()
-        # print("working")
-        # f.write(line)
-        buffer.append(line)
-        sem.release()
-
-def generateMjpeg():
     bytes = b''
-    
-    # f = open("mjpegRec", "r+b")
-    # for line in f.readlines():
-    while True:
-        sem.acquire()
-        bytes += buffer.pop(0)
-        sem.release()
-        a = bytes.find(b'\xff\xd8')
+    a = -1
+    b = -1
+
+    for line in response.iter_content(chunk_size=None):
+        bytes += line
+        if a == -1:
+            a = bytes.find(b'\xff\xd8')
+            
         b = bytes.find(b'\xff\xd9')
         if a != -1 and b != -1:
             jpg = bytes[a:b+2]
-            # bytes = bytes[b+2:]
-            # HERE TRUNCATE START OF FILE FOR b BYTES
-            # f.close()
+            bytes = bytes[b+2:]
+            a = -1
+            b = -1
             
+            sem.acquire()
+            # print("from thread")
+            buffer.append(jpg)
+            print(len(buffer))
+            sem.release()
+
+def generateMjpeg():
+    jpg = None
+    while True:
+        sem.acquire()
+        if len(buffer) > 0:
+            jpg = buffer.popleft()
+        sem.release()
+        if jpg is not None:
             return jpg
         
 def readContentLength(response):
@@ -72,17 +86,25 @@ def index():
 
 @app.route('/<path:path>',methods=['GET','POST','OPTIONS'])
 def proxy(path):
+    global recThread
 
     if request.method=='POST':
         if (request.get_json() is not None) and (request.get_json()["name"] == "camera.recordMjpeg"):
-            print("recordMjpeg")
-            request.get_json()["name"] = "camera.getLivePreview"
-            resp = requests.post(SITE_NAME+'/'+path, stream=True, json=request.get_json())
-            headers = [(name, value) for (name, value) in resp.raw.headers.items() if name.lower() not in excluded_headers]
 
             #Call recordMjpeg thread
-            recThread = threading.Thread(target=recordMjpeg, args=(resp,), daemon=True)
-            recThread.start()
+            if recThread is None:
+                print("Start recording Mjpeg")
+                request.get_json()["name"] = "camera.getLivePreview"
+                resp = requests.post(SITE_NAME+'/'+path, stream=True, json=request.get_json())
+                headers = [(name, value) for (name, value) in resp.raw.headers.items() if name.lower() not in excluded_headers]
+                recThread = threading.Thread(target=recordMjpeg, args=(resp,), daemon=True)
+                recThread.start()
+            else:
+                print("Reset recording Mjpeg")
+                sem.acquire()
+                buffer.clear()
+                print("deque cleared")
+                sem.release()
 
             response = make_response()
 
@@ -96,7 +118,7 @@ def proxy(path):
             )
         
         elif (request.get_json() is not None) and (request.get_json()["name"] == "camera.getLivePreview"):
-            print("livePreview")
+            print("livePreview stream")
             resp = requests.post(SITE_NAME+'/'+path, stream=True, json=request.get_json())
             headers = [(name, value) for (name, value) in resp.raw.headers.items() if name.lower() not in excluded_headers]
             
