@@ -1,0 +1,59 @@
+<html>
+
+<head>
+    <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
+    <!-- <script src="https://unpkg.com/aframe-physics-system@1.4.0/dist/aframe-physics-system.min.js"></script> -->
+</head>
+
+<body>
+    <script>
+        AFRAME.registerComponent('a-theta', {
+            schema: {
+                width: { type: 'number', default: 500 },
+                height: { type: 'number', default: 60 },
+                depth: { type: 'number', default: 40 },
+                color: { type: 'color', default: '#AAA' }
+            },
+            init: function () {
+                var data = this.data;
+                var el = this.el;
+
+                this.loader = new THREE.TextureLoader();
+
+                this.geometry = new THREE.SphereGeometry(data.width, data.height, data.depth);
+                this.geometry.scale(-1,1,1)
+                this.material = new THREE.MeshBasicMaterial({
+                    map: this.getImage()
+                });
+                this.material.needsUpdate = true;
+                this.mesh = new THREE.Mesh(this.geometry, this.material);
+                this.mesh.position.set(0,0,0)
+                el.setObject3D('mesh', this.mesh);
+            },
+
+            tick: function (time, timeDelta) {
+                this.mesh.material.map.img = this.getImage();
+                this.mesh.material.map.needsUpdate = true;
+            },
+
+            getImage: function () {
+                // console.log("hey")
+                return this.loader.load("https://10.64.44.242:5000/get_stream");
+            }
+        });
+    </script>
+
+    <a-scene>
+        <!-- <a-box position="-1 0.5 -3" rotation="0 45 0" color="#4CC3D9" dynamic-body></a-box>
+        <a-sphere position="0 1.25 -5" radius="1.25" color="#EF2D5E"></a-sphere>
+        <a-cylinder position="1 0.75 -3" radius="0.5" height="1.5" color="#FFC65D"></a-cylinder>
+        <a-plane position="0 0 -4" rotation="-90 0 0" width="4" height="4" color="#7BC8A4" static-body></a-plane>
+        <a-sky color="#ECECEC"></a-sky>
+        <a-entity geometry="primitive: sphere; radius: 1.5" light="type: point; color: white; intensity: 1"
+            material="color: red; shader: flat;" position="3 7 9"></a-entity>
+        <a-ocean color="aqua" depth="100" width="100"></a-ocean> -->
+        <a-entity a-theta></a-entity>
+    </a-scene>
+</body>
+
+</html>
