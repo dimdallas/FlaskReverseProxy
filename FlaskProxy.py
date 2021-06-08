@@ -5,7 +5,7 @@ import requests
 import threading
 import collections
 import signal
-import gc
+import json
 
 def handler(signum, frame):
 	print("closing")
@@ -15,13 +15,15 @@ signal.signal(signal.SIGINT, handler)
 
 app = Flask(__name__)
 SITE_NAME = 'http://10.64.45.228'
+EXECUTE_PATH = '/osc/commands/execute'
+LIVE_CMD = '{"name": "camera.getLivePreview"}'
 recThread = None
 sem = threading.Semaphore()
-buffer = collections.deque([])
+buffer = collections.deque([], maxlen=2)
 
 excluded_headers = ['content-encoding', 'transfer-encoding']
 # excluded_headers = ['content-encoding', 'transfer-encoding', 'content-length', 'connection']
-default_headers = [('Connection','Keep-Alive'), ('Content-Type','multipart/x-mixed-replace; boundary="---osclivepreview---"'), ('X-Content-Type-Options','nosniff')]
+default_headers = [('Connection','Keep-Alive'), ('X-Content-Type-Options','nosniff')]
 # headers = [('Connection','Keep-Alive'),
 # ('Content-Type','multipart/x-mixed-replace; boundary="---osclivepreview---"'),
 # ('X-Content-Type-Options','nosniff'),
@@ -47,7 +49,7 @@ def recordMjpeg(response):
             sem.acquire()
             # print("from thread")
             buffer.append(jpg)
-            print(len(buffer))
+            # print(len(buffer))
             sem.release()
 
 def generateMjpeg():
@@ -75,14 +77,31 @@ def readContentLength(response):
                 start = time.time()
         except (UnicodeDecodeError, AttributeError):
             pass
-        print(line)
-        yield "{}\n".format(time.time())
+        # print(line)
         yield line
-        time.sleep(0.1)
 
 @app.route('/')
 def index():
     return 'Flask is running ' + request.environ.get('SERVER_PROTOCOL')
+
+@app.route('/get_stream', methods=['GET'])
+def stream():
+    print("get stream")
+    resp = requests.post(SITE_NAME+EXECUTE_PATH, stream=True, json=json.loads(LIVE_CMD))
+    headers = [(name, value) for (name, value) in resp.raw.headers.items() if name.lower() not in excluded_headers]
+    
+    response = Response(
+        stream_with_context(resp.iter_content(chunk_size=None)),
+        resp.status_code,
+        headers
+    )
+
+    response.headers.add("Access-Control-Allow-Origin", "*")
+    response.headers.add('Access-Control-Allow-Headers', "*")
+    response.headers.add('Access-Control-Allow-Methods', "*")
+    # response.headers.add('Cross-Origin-Opener-Policy', "same-origin")
+    # response.headers.add('Cross-Origin-Embedder-Policy', "require-corp")
+    return response
 
 @app.route('/<path:path>',methods=['GET','POST','OPTIONS'])
 def proxy(path):
@@ -96,7 +115,7 @@ def proxy(path):
                 print("Start recording Mjpeg")
                 request.get_json()["name"] = "camera.getLivePreview"
                 resp = requests.post(SITE_NAME+'/'+path, stream=True, json=request.get_json())
-                headers = [(name, value) for (name, value) in resp.raw.headers.items() if name.lower() not in excluded_headers]
+                # headers = [(name, value) for (name, value) in resp.raw.headers.items() if name.lower() not in excluded_headers]
                 recThread = threading.Thread(target=recordMjpeg, args=(resp,), daemon=True)
                 recThread.start()
             else:
@@ -127,6 +146,11 @@ def proxy(path):
                 resp.status_code,
                 headers
             )
+            # response = Response(
+            #     readContentLength(resp),
+            #     resp.status_code,
+            #     headers
+            # )
         # REGULAR POST
         else:
             if request.get_json() is not None:
